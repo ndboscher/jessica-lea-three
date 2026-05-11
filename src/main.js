@@ -4,17 +4,16 @@ import {
   BufferGeometry,
   Clock,
   Group,
-  IcosahedronGeometry,
   Mesh,
   MeshBasicMaterial,
-  MeshStandardMaterial,
+  MeshPhysicalMaterial,
   PerspectiveCamera,
   PointLight,
   Points,
   PointsMaterial,
   Scene,
+  SphereGeometry,
   TorusGeometry,
-  TorusKnotGeometry,
   Vector2,
   WebGLRenderer,
 } from 'three'
@@ -239,19 +238,20 @@ function setupSignalScene() {
   fill.position.set(-5, -3, 6)
   scene.add(fill)
 
-  const knot = new Mesh(
-    new TorusKnotGeometry(1.75, 0.33, 220, 32, 3, 5),
-    new MeshStandardMaterial({
+  const sphere = new Mesh(
+    new SphereGeometry(1.95, 64, 64),
+    new MeshPhysicalMaterial({
       color: 0x2b5682,
-      roughness: 0.24,
-      metalness: 0.42,
+      roughness: 0.16,
+      metalness: 0.22,
+      clearcoat: 1,
+      clearcoatRoughness: 0.18,
+      transmission: 0.08,
       emissive: 0x13263a,
-      emissiveIntensity: 0.4,
+      emissiveIntensity: 0.32,
     }),
   )
-  knot.rotation.x = 0.8
-  knot.rotation.z = 0.2
-  root.add(knot)
+  root.add(sphere)
 
   const halo = new Mesh(
     new TorusGeometry(2.75, 0.045, 12, 220),
@@ -265,14 +265,16 @@ function setupSignalScene() {
   root.add(halo)
 
   const shell = new Mesh(
-    new IcosahedronGeometry(1.35, 1),
+    new SphereGeometry(2.35, 26, 26),
     new MeshBasicMaterial({
       color: 0x8d40aa,
       wireframe: true,
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.28,
     }),
   )
+  shell.rotation.x = 0.35
+  shell.rotation.y = 0.2
   root.add(shell)
 
   const pointCount = 900
@@ -330,8 +332,10 @@ function setupSignalScene() {
     if (!prefersReducedMotion) {
       root.rotation.y = elapsed * 0.25 + pointer.x * 0.22
       root.rotation.x = Math.sin(elapsed * 0.45) * 0.12 + pointer.y * 0.12
-      knot.rotation.z = elapsed * 0.2
+      sphere.rotation.y = elapsed * 0.35
+      sphere.rotation.z = Math.sin(elapsed * 0.3) * 0.08
       halo.rotation.z = elapsed * 0.28
+      shell.rotation.z = -elapsed * 0.16
       particles.rotation.y = -elapsed * 0.045
       particles.rotation.x = elapsed * 0.025
     }
