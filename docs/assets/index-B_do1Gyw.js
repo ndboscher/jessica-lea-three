@@ -4323,7 +4323,7 @@ void main() {
           uImageResolution
         );
 
-        vec3 baseColor = texture2D(uTexture, displacedUv).rgb * 0.48;
+        vec3 baseColor = texture2D(uTexture, displacedUv).rgb * 0.68;
 
         float aspect = uResolution.x / uResolution.y;
         vec2 tiled = fract(vec2(uv.x * aspect, uv.y) * 50.0) * 2.0 - 1.0;
@@ -4333,7 +4333,7 @@ void main() {
         vec3 scanColor = vec3(1.2, 1.15, 1.1) * scanShape * flow;
         vec3 color = screenBlend(baseColor, scanColor);
 
-        float vignette = smoothstep(1.05, 0.28, distance(uv, vec2(0.5)));
+        float vignette = smoothstep(1.12, 0.18, distance(uv, vec2(0.5)));
         color *= vignette;
 
         gl_FragColor = vec4(color, 1.0);
