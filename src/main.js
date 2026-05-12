@@ -1,19 +1,12 @@
 import {
-  AmbientLight,
-  BufferAttribute,
-  BufferGeometry,
   Clock,
-  Group,
   Mesh,
-  MeshBasicMaterial,
-  MeshPhysicalMaterial,
-  PerspectiveCamera,
-  PointLight,
-  Points,
-  PointsMaterial,
+  OrthographicCamera,
+  PlaneGeometry,
   Scene,
-  SphereGeometry,
-  TorusGeometry,
+  ShaderMaterial,
+  SRGBColorSpace,
+  TextureLoader,
   Vector2,
   WebGLRenderer,
 } from 'three'
@@ -218,106 +211,127 @@ function setupSignalScene() {
     alpha: true,
     antialias: true,
   })
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.8))
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
 
   const scene = new Scene()
-  const camera = new PerspectiveCamera(32, 1, 0.1, 100)
-  camera.position.set(0, 0.2, 8.5)
+  const camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
 
-  const root = new Group()
-  scene.add(root)
+  const pointer = new Vector2(0.5, 0.5)
+  const targetPointer = new Vector2(0.5, 0.5)
+  const imageResolution = new Vector2(800, 533)
+  const resolution = new Vector2(1, 1)
 
-  const ambient = new AmbientLight(0xffffff, 1.3)
-  scene.add(ambient)
+  const texture = new TextureLoader().load(assets.heroPhoto, (loadedTexture) => {
+    loadedTexture.colorSpace = SRGBColorSpace
+    const { image } = loadedTexture
 
-  const key = new PointLight(0xffffff, 16, 30)
-  key.position.set(4.5, 4.5, 7)
-  scene.add(key)
+    if (image?.width && image?.height) {
+      imageResolution.set(image.width, image.height)
+    }
+  })
+  texture.colorSpace = SRGBColorSpace
 
-  const fill = new PointLight(0x36a4aa, 14, 32)
-  fill.position.set(-5, -3, 6)
-  scene.add(fill)
+  const material = new ShaderMaterial({
+    uniforms: {
+      uTexture: { value: texture },
+      uTime: { value: 0 },
+      uPointer: { value: pointer.clone() },
+      uResolution: { value: resolution },
+      uImageResolution: { value: imageResolution },
+      uMotion: { value: prefersReducedMotion ? 0 : 1 },
+    },
+    vertexShader: `
+      varying vec2 vUv;
 
-  const sphere = new Mesh(
-    new SphereGeometry(1.95, 64, 64),
-    new MeshPhysicalMaterial({
-      color: 0x2b5682,
-      roughness: 0.16,
-      metalness: 0.22,
-      clearcoat: 1,
-      clearcoatRoughness: 0.18,
-      transmission: 0.08,
-      emissive: 0x13263a,
-      emissiveIntensity: 0.32,
-    }),
-  )
-  root.add(sphere)
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying vec2 vUv;
 
-  const halo = new Mesh(
-    new TorusGeometry(2.75, 0.045, 12, 220),
-    new MeshBasicMaterial({
-      color: 0xdaa255,
-      transparent: true,
-      opacity: 0.88,
-    }),
-  )
-  halo.rotation.x = Math.PI / 2.5
-  root.add(halo)
+      uniform sampler2D uTexture;
+      uniform vec2 uPointer;
+      uniform vec2 uResolution;
+      uniform vec2 uImageResolution;
+      uniform float uTime;
+      uniform float uMotion;
 
-  const shell = new Mesh(
-    new SphereGeometry(2.35, 26, 26),
-    new MeshBasicMaterial({
-      color: 0x8d40aa,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.28,
-    }),
-  )
-  shell.rotation.x = 0.35
-  shell.rotation.y = 0.2
-  root.add(shell)
+      vec2 coverUv(vec2 uv, vec2 resolution, vec2 imageResolution) {
+        float screenRatio = resolution.x / resolution.y;
+        float imageRatio = imageResolution.x / imageResolution.y;
 
-  const pointCount = 900
-  const positions = new Float32Array(pointCount * 3)
+        vec2 scaledSize = screenRatio < imageRatio
+          ? vec2(imageResolution.x * resolution.y / imageResolution.y, resolution.y)
+          : vec2(resolution.x, imageResolution.y * resolution.x / imageResolution.x);
 
-  for (let i = 0; i < pointCount; i += 1) {
-    const stride = i * 3
-    const radius = 3.4 + Math.random() * 1.8
-    const theta = Math.random() * Math.PI * 2
-    const phi = Math.acos(2 * Math.random() - 1)
+        vec2 offset = screenRatio < imageRatio
+          ? vec2((scaledSize.x - resolution.x) * 0.5, 0.0)
+          : vec2(0.0, (scaledSize.y - resolution.y) * 0.5);
 
-    positions[stride] = radius * Math.sin(phi) * Math.cos(theta)
-    positions[stride + 1] = radius * Math.sin(phi) * Math.sin(theta)
-    positions[stride + 2] = radius * Math.cos(phi)
-  }
+        return (uv * resolution + offset) / scaledSize;
+      }
 
-  const particles = new Points(
-    new BufferGeometry(),
-    new PointsMaterial({
-      color: 0x754098,
-      size: 0.045,
-      transparent: true,
-      opacity: 0.5,
-    }),
-  )
-  particles.geometry.setAttribute('position', new BufferAttribute(positions, 3))
-  scene.add(particles)
+      float scanBand(float y, float center, float width) {
+        return smoothstep(center - width, center, y) - smoothstep(center, center + width, y);
+      }
 
-  const pointer = new Vector2(0, 0)
+      void main() {
+        vec2 uv = vUv;
+        float scan = 0.74 - fract(uTime * 0.075 * max(uMotion, 0.15));
+        float band = scanBand(uv.y, scan, 0.16);
+        float wave = sin((uv.y - scan) * 42.0 - uTime * 7.0 * max(uMotion, 0.2)) * band * 0.012;
+        float pointerInfluence = (uPointer.x - 0.5) * 0.03 * (0.35 + uv.y * 0.65);
+
+        vec2 distortedUv = uv;
+        distortedUv.x += wave + pointerInfluence;
+        distortedUv.y += (uPointer.y - 0.5) * 0.022;
+
+        vec2 sampleUv = coverUv(distortedUv, uResolution, uImageResolution);
+
+        float chroma = band * 0.008;
+        vec3 color;
+        color.r = texture2D(uTexture, sampleUv + vec2(chroma, 0.0)).r;
+        color.g = texture2D(uTexture, sampleUv).g;
+        color.b = texture2D(uTexture, sampleUv - vec2(chroma, 0.0)).b;
+
+        float scanLines = 0.5 + 0.5 * sin(uv.y * uResolution.y * 0.18 - uTime * 18.0 * max(uMotion, 0.2));
+        color += band * vec3(0.08, 0.02, 0.07);
+        color += band * scanLines * vec3(0.12, 0.08, 0.02) * 0.18;
+
+        float glow = smoothstep(0.24, 0.0, abs(uv.y - scan));
+        color += glow * vec3(0.06, 0.02, 0.08) * 0.34;
+
+        float vignette = smoothstep(1.08, 0.3, distance(uv, vec2(0.5)));
+        color *= vignette;
+
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `,
+  })
+
+  const imagePlane = new Mesh(new PlaneGeometry(2, 2), material)
+  scene.add(imagePlane)
 
   const handlePointerMove = (event) => {
     const bounds = stage.getBoundingClientRect()
-    pointer.x = ((event.clientX - bounds.left) / bounds.width - 0.5) * 2
-    pointer.y = ((event.clientY - bounds.top) / bounds.height - 0.5) * 2
+    targetPointer.x = (event.clientX - bounds.left) / bounds.width
+    targetPointer.y = (event.clientY - bounds.top) / bounds.height
   }
 
-  window.addEventListener('pointermove', handlePointerMove)
+  const handlePointerLeave = () => {
+    targetPointer.set(0.5, 0.5)
+  }
+
+  stage.addEventListener('pointermove', handlePointerMove)
+  stage.addEventListener('pointerleave', handlePointerLeave)
 
   const resize = () => {
     const { clientWidth, clientHeight } = stage
     renderer.setSize(clientWidth, clientHeight, false)
-    camera.aspect = clientWidth / clientHeight
-    camera.updateProjectionMatrix()
+    resolution.set(clientWidth, clientHeight)
+    material.uniforms.uResolution.value = resolution
   }
 
   const resizeObserver = new ResizeObserver(resize)
@@ -329,16 +343,9 @@ function setupSignalScene() {
   const animate = () => {
     const elapsed = clock.getElapsedTime()
 
-    if (!prefersReducedMotion) {
-      root.rotation.y = elapsed * 0.25 + pointer.x * 0.22
-      root.rotation.x = Math.sin(elapsed * 0.45) * 0.12 + pointer.y * 0.12
-      sphere.rotation.y = elapsed * 0.35
-      sphere.rotation.z = Math.sin(elapsed * 0.3) * 0.08
-      halo.rotation.z = elapsed * 0.28
-      shell.rotation.z = -elapsed * 0.16
-      particles.rotation.y = -elapsed * 0.045
-      particles.rotation.x = elapsed * 0.025
-    }
+    pointer.lerp(targetPointer, prefersReducedMotion ? 1 : 0.08)
+    material.uniforms.uPointer.value.copy(pointer)
+    material.uniforms.uTime.value = elapsed
 
     renderer.render(scene, camera)
     requestAnimationFrame(animate)
