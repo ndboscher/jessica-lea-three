@@ -16,8 +16,8 @@ const base = import.meta.env.BASE_URL
 
 const assets = {
   logo: `${base}assets/jessica-lea-logo.svg`,
-  heroPhoto: `${base}assets/jessica-linkedin-keynote-3.jpg`,
-  heroDepth: `${base}assets/jessica-linkedin-keynote-3-depth.png`,
+  heroPhoto: `${base}assets/jessica-linkedin-keynote-2.jpg`,
+  heroDepth: `${base}assets/jessica-linkedin-keynote-2-depth.png`,
   aboutPhoto: `${base}assets/jessica-linkedin-keynote-1.jpg`,
   contactPhoto: `${base}assets/jessica-linkedin-keynote-2.jpg`,
 }
