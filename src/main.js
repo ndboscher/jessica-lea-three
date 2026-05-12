@@ -17,6 +17,7 @@ const base = import.meta.env.BASE_URL
 const assets = {
   logo: `${base}assets/jessica-lea-logo.svg`,
   heroPhoto: `${base}assets/jessica-linkedin-keynote-3.jpg`,
+  heroDepth: `${base}assets/jessica-linkedin-keynote-3-depth.png`,
   aboutPhoto: `${base}assets/jessica-linkedin-keynote-1.jpg`,
   contactPhoto: `${base}assets/jessica-linkedin-keynote-2.jpg`,
 }
@@ -80,15 +81,6 @@ document.querySelector('#app').innerHTML = `
         <aside class="signal-card" aria-label="Interactive brand scene">
           <div class="signal-stage">
             <canvas id="signal-canvas" aria-hidden="true"></canvas>
-            <div class="stage-copy">
-              <p class="card-label">Jessica's edge</p>
-              <h2>Strategic depth, visual calm, and human-centered movement.</h2>
-              <div class="signal-tags" aria-hidden="true">
-                <span>People</span>
-                <span>Strategy</span>
-                <span>Action</span>
-              </div>
-            </div>
           </div>
         </aside>
       </section>
@@ -221,7 +213,8 @@ function setupSignalScene() {
   const imageResolution = new Vector2(800, 533)
   const resolution = new Vector2(1, 1)
 
-  const texture = new TextureLoader().load(assets.heroPhoto, (loadedTexture) => {
+  const loader = new TextureLoader()
+  const texture = loader.load(assets.heroPhoto, (loadedTexture) => {
     loadedTexture.colorSpace = SRGBColorSpace
     const { image } = loadedTexture
 
@@ -230,15 +223,16 @@ function setupSignalScene() {
     }
   })
   texture.colorSpace = SRGBColorSpace
+  const depthTexture = loader.load(assets.heroDepth)
 
   const material = new ShaderMaterial({
     uniforms: {
       uTexture: { value: texture },
-      uTime: { value: 0 },
+      uDepthTexture: { value: depthTexture },
+      uProgress: { value: 0 },
       uPointer: { value: pointer.clone() },
       uResolution: { value: resolution },
       uImageResolution: { value: imageResolution },
-      uMotion: { value: prefersReducedMotion ? 0 : 1 },
     },
     vertexShader: `
       varying vec2 vUv;
@@ -252,11 +246,11 @@ function setupSignalScene() {
       varying vec2 vUv;
 
       uniform sampler2D uTexture;
+      uniform sampler2D uDepthTexture;
       uniform vec2 uPointer;
       uniform vec2 uResolution;
       uniform vec2 uImageResolution;
-      uniform float uTime;
-      uniform float uMotion;
+      uniform float uProgress;
 
       vec2 coverUv(vec2 uv, vec2 resolution, vec2 imageResolution) {
         float screenRatio = resolution.x / resolution.y;
@@ -273,37 +267,44 @@ function setupSignalScene() {
         return (uv * resolution + offset) / scaledSize;
       }
 
-      float scanBand(float y, float center, float width) {
-        return smoothstep(center - width, center, y) - smoothstep(center, center + width, y);
+      float rectMask(vec2 point, vec2 halfSize) {
+        vec2 edge = smoothstep(halfSize, halfSize - vec2(0.025), abs(point));
+        return edge.x * edge.y;
+      }
+
+      float crossMask(vec2 point) {
+        float horizontal = rectMask(point, vec2(0.28, 0.025));
+        float vertical = rectMask(point, vec2(0.025, 0.28));
+        return max(horizontal, vertical);
+      }
+
+      vec3 screenBlend(vec3 base, vec3 blend) {
+        return 1.0 - (1.0 - base) * (1.0 - blend);
       }
 
       void main() {
         vec2 uv = vUv;
-        float scan = 0.74 - fract(uTime * 0.075 * max(uMotion, 0.15));
-        float band = scanBand(uv.y, scan, 0.16);
-        float wave = sin((uv.y - scan) * 42.0 - uTime * 7.0 * max(uMotion, 0.2)) * band * 0.012;
-        float pointerInfluence = (uPointer.x - 0.5) * 0.03 * (0.35 + uv.y * 0.65);
+        vec2 pointer = (uPointer - 0.5) * 2.0;
+        vec2 sampleUv = coverUv(uv, uResolution, uImageResolution);
 
-        vec2 distortedUv = uv;
-        distortedUv.x += wave + pointerInfluence;
-        distortedUv.y += (uPointer.y - 0.5) * 0.022;
+        float depthSample = texture2D(uDepthTexture, sampleUv).r;
+        vec2 displacedUv = coverUv(
+          uv + depthSample * pointer * 0.012,
+          uResolution,
+          uImageResolution
+        );
 
-        vec2 sampleUv = coverUv(distortedUv, uResolution, uImageResolution);
+        vec3 baseColor = texture2D(uTexture, displacedUv).rgb * 0.48;
 
-        float chroma = band * 0.008;
-        vec3 color;
-        color.r = texture2D(uTexture, sampleUv + vec2(chroma, 0.0)).r;
-        color.g = texture2D(uTexture, sampleUv).g;
-        color.b = texture2D(uTexture, sampleUv - vec2(chroma, 0.0)).b;
+        float aspect = uResolution.x / uResolution.y;
+        vec2 tiled = fract(vec2(uv.x * aspect, uv.y) * 50.0) * 2.0 - 1.0;
+        float scanShape = crossMask(tiled);
+        float flow = 1.0 - smoothstep(0.0, 0.028, abs((1.0 - depthSample) - uProgress));
 
-        float scanLines = 0.5 + 0.5 * sin(uv.y * uResolution.y * 0.18 - uTime * 18.0 * max(uMotion, 0.2));
-        color += band * vec3(0.08, 0.02, 0.07);
-        color += band * scanLines * vec3(0.12, 0.08, 0.02) * 0.18;
+        vec3 scanColor = vec3(1.2, 1.15, 1.1) * scanShape * flow;
+        vec3 color = screenBlend(baseColor, scanColor);
 
-        float glow = smoothstep(0.24, 0.0, abs(uv.y - scan));
-        color += glow * vec3(0.06, 0.02, 0.08) * 0.34;
-
-        float vignette = smoothstep(1.08, 0.3, distance(uv, vec2(0.5)));
+        float vignette = smoothstep(1.05, 0.28, distance(uv, vec2(0.5)));
         color *= vignette;
 
         gl_FragColor = vec4(color, 1.0);
@@ -345,7 +346,7 @@ function setupSignalScene() {
 
     pointer.lerp(targetPointer, prefersReducedMotion ? 1 : 0.08)
     material.uniforms.uPointer.value.copy(pointer)
-    material.uniforms.uTime.value = elapsed
+    material.uniforms.uProgress.value = prefersReducedMotion ? 0.62 : (elapsed * 0.3) % 1
 
     renderer.render(scene, camera)
     requestAnimationFrame(animate)
